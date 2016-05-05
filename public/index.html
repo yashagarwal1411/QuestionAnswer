@@ -1,0 +1,156 @@
+<html>
+
+<head>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" integrity="sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7" crossorigin="anonymous">
+</head>
+
+<body>
+
+<div data-bind="with: currentUser, visible: !$root.isUserUpdated()">
+  Name: <input type="text" pattern=".{3,}" required title="3 characters minimum"
+        data-bind="textInput: name"/><br />
+  You are a:
+  <select data-bind="value: type">
+    <option value="TEACHER">Teacher</option>
+    <option value="STUDENT">Student</option>
+  </select>
+  <button data-bind="click: $root.updateCurrentUser">Submit</button>
+</div>
+
+<div data-bind="visible: ($root.isUserUpdated() && ($root.currentUser.type() == 'STUDENT'))">
+  Ask a new question:
+  <div data-bind="with: $root.newQuestion">
+    <br />
+    Title: <input type="text" data-bind="textInput: title" /><br />
+    <br />
+    <button data-bind="click: $root.addNewQuestion">Add new Question</button>
+  </div>
+
+  <hr>
+</div>
+
+
+
+<div data-bind="visible: $root.isUserUpdated">
+  <b>Existing questions:</b>
+  <table class="table-striped">
+    <thead>
+      <tr>
+        <th style="padding:0 15px 0 15px;">Id</th>
+        <th style="padding:0 15px 0 15px;">Title</th>
+        <th style="padding:0 15px 0 15px;">Answer</th>
+        <th style="padding:0 15px 0 15px;">Asked by student</th>
+        <th style="padding:0 15px 0 15px;">Answered by teacher</th>
+        <th style="padding:0 15px 0 15px;">Submit Answer</th>
+      </tr>
+    </thead>
+    <tbody data-bind="foreach: $root.questions">
+      <tr>
+        <td><span data-bind="text: id"></span></td>
+        <td><span data-bind="text: title"></span></td>
+        <td><textarea data-bind="textInput: answer,
+      disable: ($root.currentUser.type() == 'STUDENT' || teacher.name() != '')"></textarea></td>
+        <td><span data-bind="text: student.name"></span></td>
+        <td><span data-bind="text: teacher.name"></span></td>
+        <td><button data-bind="click: $root.submitAnswer,
+          visible: (teacher.name() == '' && $root.currentUser.type() == 'TEACHER')">Submit Answer</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+
+
+    <br />
+  </div>
+</div>
+
+
+
+<script type="text/javascript" src="/js/lib/jquery-1.11.3.min.js"></script>
+<script type="text/javascript" src="/js/lib/knockout-3.4.0.js"></script>
+<script type="text/javascript">
+  var host = location.origin.replace(/^http/, 'ws')
+  var ws = new WebSocket(host);
+
+  function ViewModel() {
+    var self = this;
+    var User = function(data) {
+      return {
+        name: ko.observable(data? data.name: ""),
+        type: ko.observable(data? data.type: "")
+      }
+    }
+    var Question = function(data) {
+      return {
+        id: data? data.id: 0,
+        title: ko.observable(data? data.title: ""),
+        answer: ko.observable(data? data.answer: ""),
+        student: new User(data? data.student: {name: "", type: "STUDENT"}),
+        teacher: new User(data? data.teacher: {name: "", type: "TEACHER"})
+      }
+    }
+
+    self.currentUser = new User();
+    self.questions = ko.observableArray();
+    self.newQuestion = new Question({student: self.currentUser});
+    self.isUserUpdated = ko.observable(false);
+
+    self.updateCurrentUser = function() {
+      console.log(ko.toJS(self.currentUser));
+      if (self.currentUser.name().length > 0) {
+        self.isUserUpdated(true);
+      }
+    }
+
+    self.addNewQuestion = function() {
+      console.log("New question added");
+      var data = ko.toJS(self.newQuestion);
+      data.event = "AddQuestion";
+      console.log(data);
+      ws.send(JSON.stringify(data));
+
+      self.newQuestion.id = 0;
+      self.newQuestion.title("");
+      self.newQuestion.answer("");
+      self.newQuestion.student.name("");
+      self.newQuestion.student.type("STUDENT");
+      self.newQuestion.teacher.name("");
+      self.newQuestion.teacher.type("TEACHER");
+    };
+
+    self.submitAnswer = function(question) {
+      console.log("Posting answer for question:");
+      question.teacher.name(self.currentUser.name());
+      var data = ko.toJS(question);
+      data.event = "QuestionAnswered";
+      console.log(data);
+      ws.send(JSON.stringify(data));
+    };
+
+    ws.onmessage = function (event) {
+      console.log(event);
+      var data = JSON.parse(event.data);
+      if (data.event == "AddQuestion") {
+        self.questions.push(new Question(data));
+      } else if (data.event == "AddExistingQuestions") {
+        for (var i in data.questions) {
+          self.questions.push(new Question(data.questions[i]));
+        }
+      } else if (data.event == "QuestionAnswered") {
+        for (var i in self.questions())  {
+          var question = self.questions()[i];
+          if (question.id == data.id) {
+            question.answer(data.answer);
+            question.teacher.name(data.teacher.name);
+          }
+        }
+      }
+
+    };
+
+  }
+  ko.applyBindings(new ViewModel());
+</script>
+</body>
+</html>

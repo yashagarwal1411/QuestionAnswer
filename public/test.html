@@ -1,0 +1,155 @@
+<html>
+
+<head>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" integrity="sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7" crossorigin="anonymous">
+</head>
+
+<body>
+
+<div data-bind="with: currentUser, visible: !$root.isUserUpdated()">
+  Name: <input type="text" pattern=".{3,}" required title="3 characters minimum"
+        data-bind="textInput: name"/><br />
+  You are a:
+  <select data-bind="value: type">
+    <option value="TEACHER">Teacher</option>
+    <option value="STUDENT">Student</option>
+  </select>
+  <button data-bind="click: $root.updateCurrentUser">Submit</button>
+</div>
+
+<div data-bind="visible: $root.isUserUpdated">
+  <span data-bind="text: $root.userMessage"></span><br /><br />
+  <b>Existing questions:</b>
+  <table class="table-striped">
+    <thead>
+      <tr>
+        <th style="padding:0 15px 0 15px;">Id</th>
+        <th style="padding:0 15px 0 15px;">Title</th>
+        <th style="padding:0 15px 0 15px;">Answer</th>
+        <th style="padding:0 15px 0 15px;">Asked by student</th>
+        <th style="padding:0 15px 0 15px;">Answered by teacher</th>
+      </tr>
+    </thead>
+    <tbody data-bind="foreach: $root.questions">
+      <tr>
+        <td><span data-bind="text: id"></span></td>
+        <td><span data-bind="text: title"></span></td>
+        <td><textarea data-bind="textInput: answer"></textarea></td>
+        <td><span data-bind="text: student.name"></span></td>
+        <td><span data-bind="text: teacher.name"></span></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<script type="text/javascript" src="/js/lib/jquery-1.11.3.min.js"></script>
+<script type="text/javascript" src="/js/lib/knockout-3.4.0.js"></script>
+<script type="text/javascript">
+
+  var randomStudentNames = ["Aaron", "Ben", "Charles", "Dan", "Sam"];
+  var randomTeacherNames = ["Cynthia", "Christine", "Danielle", "Sandra", "Rosy"];
+
+  var host = location.origin.replace(/^http/, 'ws');
+  var ws = new WebSocket(host);
+
+  function ViewModel() {
+    var self = this;
+    var User = function(data) {
+      return {
+        name: ko.observable(data? data.name: ""),
+        type: ko.observable(data? data.type: "")
+      }
+    }
+    var Question = function(data) {
+      return {
+        id: data? data.id: 0,
+        title: ko.observable(data? data.title: ""),
+        answer: ko.observable(data? data.answer: ""),
+        student: new User(data? data.student: {name: "", type: "STUDENT"}),
+        teacher: new User(data? data.teacher: {name: "", type: "TEACHER"})
+      }
+    }
+
+    self.hasTestStarted = ko.observable(false);
+
+    self.questions = ko.observableArray();
+    self.currentUser = new User();
+    self.isUserUpdated = ko.observable(false);
+    self.userMessage = ko.observable("");
+
+    self.updateCurrentUser = function() {
+      console.log(ko.toJS(self.currentUser));
+      if (self.currentUser.name().length > 0) {
+        self.isUserUpdated(true);
+      }
+      if (self.currentUser.type() == "TEACHER") {
+        self.userMessage("User " + self.currentUser.name() + " is teacher. Answering questions automatically every 3 sec.")
+        setInterval(answerQuestion, 3000);
+      } else {
+        self.userMessage("User " + self.currentUser.name() + " is student. Asking questions automatically every 3 sec.");
+        setInterval(askQuestion, 3000);
+      }
+    }
+
+    var questionCounter = 1;
+    var answerCounter = 1;
+
+    var askQuestion = function() {
+      var question = {
+        id: 0,
+        title: "Question " + questionCounter + " asked by student " + self.currentUser.name(),
+        answer: "",
+        teacher: {name: "", type: "TEACHER"},
+        student: {name: self.currentUser.name(), type: "STUDENT"}
+      }
+      console.log("Student " + question.student.name + " asking question " + question.title);
+      questionCounter += 1;
+      var data = question;
+      data.event = "AddQuestion";
+      ws.send(JSON.stringify(data));
+    }
+
+    var answerQuestion = function() {
+      console.log("-+++++")
+      var answered = false;
+      for (var i in self.questions()) {
+        var question = self.questions()[i];
+        if (question.teacher.name() == '' && !answered) {
+          question.answer("Answer " + answerCounter + " by " + self.currentUser.name());
+          question.teacher.name(self.currentUser.name());
+          var data = ko.toJS(question);
+          data.event = "QuestionAnswered";
+          ws.send(JSON.stringify(data));
+          console.log("Teacher " + data.teacher.name + " answering question " + data.title);
+          answerCounter += 1;
+          answered = true;
+        }
+      }
+    }
+
+    ws.onmessage = function (event) {
+      var data = JSON.parse(event.data);
+      if (data.event == "AddQuestion") {
+        self.questions.push(new Question(data));
+      } else if (data.event == "AddExistingQuestions") {
+        for (var i in data.questions) {
+          self.questions.push(new Question(data.questions[i]));
+        }
+      } else if (data.event == "QuestionAnswered") {
+        for (var i in self.questions())  {
+          var question = self.questions()[i];
+          if (question.id == data.id) {
+            question.answer(data.answer);
+            question.teacher.name(data.teacher.name);
+          }
+        }
+      }
+    };
+  };
+
+  ko.applyBindings(new ViewModel());
+
+</script>
+
+</body>
+</html>
